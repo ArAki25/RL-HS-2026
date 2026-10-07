@@ -22,6 +22,8 @@ _agent = make_agent(
     _bundle["agent"],
     {c["cardId"]: c for c in _bundle["cards"]},
     {a["attackId"]: a for a in _bundle["attacks"]},
+    model=os.path.join(_DIR, _bundle["model"]) if _bundle.get("model") else None,
+    deck=DECK,
 )
 
 

@@ -133,12 +133,23 @@ def _resolve(option: dict, obs: dict) -> dict | None:
     return zone[index]
 
 
-AGENTS = ["random", "heuristic"]
+AGENTS = ["random", "heuristic", "rl"]
 
 
-def make_agent(name: str, cards: dict[int, dict], attacks: dict[int, dict]):
+def make_agent(name: str, cards: dict[int, dict], attacks: dict[int, dict], model: str | None = None,
+               deck: list[int] | None = None):
+    """Create an agent. "rl" needs the trained weights (``model``, an .npz file) and its own deck."""
     if name == "random":
         return RandomAgent()
     if name == "heuristic":
         return HeuristicAgent(cards, attacks)
+    if name == "rl":
+        # Imported here so that the baseline agents work without numpy.
+        from .features import Tables
+        from .policy import NumpyPolicy, PolicyAgent
+
+        if model is None:
+            raise ValueError("the rl agent needs a model file")
+        tables = Tables(cards, attacks)
+        return PolicyAgent(NumpyPolicy.load(model, tables), tables, deck)
     raise ValueError(f"unknown agent {name!r}, choose from {AGENTS}")
