@@ -1,0 +1,6 @@
+# kaggle-environments itself is installed with --no-deps (see README): its full dependency
+# list (jax, transformers, open_spiel, pygame, ...) is not needed for the cabt environment.
+numpy
+jsonschema
+requests
+termcolor
