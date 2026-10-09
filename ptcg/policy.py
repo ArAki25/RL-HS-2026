@@ -17,6 +17,8 @@ must only depend on numpy.
 
 from __future__ import annotations
 
+from collections import Counter
+
 import numpy as np
 
 from .features import Encoder, Tables
@@ -100,10 +102,22 @@ class PolicyAgent:
             logits, value = self.policy(x)
             logp = logits.astype(np.float64) - logits.max()
             logp -= np.log(np.exp(logp).sum())
-            choice = int(logp.argmax()) if self.greedy else int(self.rng.choice(len(logp), p=np.exp(logp)))
+            choice = _most_likely(x, logp) if self.greedy else int(self.rng.choice(len(logp), p=np.exp(logp)))
             if self.record:
                 self.steps.append((x, choice, float(logp[choice]), value))
             if choice == len(candidates):  # STOP
                 break
             picked.append(candidates[choice])
         return picked
+
+
+def _most_likely(x: dict[str, np.ndarray], logp: np.ndarray) -> int:
+    """Index of the most likely distinct option.
+
+    Identical options (e.g. two copies of a card in the deck) get identical logits, so each one only
+    gets a share of the probability that the policy gives to that action; their shares are summed.
+    """
+    keys = [(x["opt_feats"][i].tobytes(), x["opt_card"][i], x["opt_slot"][i], x["opt_attack"][i])
+            for i in range(len(logp))]
+    counts = Counter(keys)
+    return max(range(len(logp)), key=lambda i: logp[i] + np.log(counts[keys[i]]))

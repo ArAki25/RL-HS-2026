@@ -8,7 +8,7 @@ from torch import nn
 from torch.nn import functional as F
 
 from .features import (
-    ATTACK_FEATURES, CARD_FEATURES, GLOBAL_FEATURES, NO_SLOT, OPTION_FEATURES, SLOT_FEATURES, SLOTS, Tables,
+    ATTACK_FEATURES, CARD_FEATURES, GLOBAL_FEATURES, OPTION_FEATURES, SLOT_FEATURES, SLOTS, Tables,
 )
 from .policy import (
     ATTACK_EMBED, CARD_DIM, CARD_EMBED, HEAD_DIM, OPTION_DIM, POOL_SCALE, SLOT_DIM, STATE_DIM, NumpyPolicy,
@@ -64,14 +64,16 @@ class PolicyNet(nn.Module):
         misc = lookup(b["misc_ids"], card).flatten(1)
         state = self.state(torch.cat([b["glob"], slots.flatten(1), *pooled, misc], -1))
 
-        n = len(slots)
-        slots = torch.cat([slots, slots.new_zeros(n, 1, SLOT_DIM)], 1)
-        option_slot = lookup(torch.arange(n)[:, None] * slots.shape[1] + b["opt_slot"], slots.flatten(0, 1))
+        # Options are a flat list over the whole batch (opt_batch = owning decision), so that padding
+        # (most decisions have few options, some have 50) does not cost compute.
+        slots = torch.cat([slots, slots.new_zeros(len(slots), 1, SLOT_DIM)], 1)
+        option_slot = lookup(b["opt_batch"] * slots.shape[1] + b["opt_slot"], slots.flatten(0, 1))
         option = self.option(torch.cat(
             [b["opt_feats"], lookup(b["opt_card"], card), option_slot, lookup(b["opt_attack"], attack)], -1
         ))
-        hidden = F.relu(self.pi_state(state)[:, None, :] + self.pi_option(option))
-        logits = self.pi_out(hidden).squeeze(-1).masked_fill(~b["mask"], MASKED)
+        hidden = F.relu(self.pi_state(state)[b["opt_batch"]] + self.pi_option(option))
+        logits = self.pi_out(hidden).squeeze(-1)
+        logits = logits.new_full(b["mask"].shape, MASKED).masked_scatter(b["mask"], logits)
         value = torch.tanh(self.v1(F.relu(self.v0(state)))).squeeze(-1)
         return logits, value
 
@@ -106,18 +108,19 @@ class PolicyNet(nn.Module):
 
 
 class Buffer:
-    """Stores encoded decisions (with a varying number of options) and builds padded batches."""
+    """Stores encoded decisions (with a varying number of options) and builds batches.
+
+    A batch has the per-decision arrays stacked, the options of all its decisions concatenated
+    (``opt_batch`` says which decision an option belongs to), and ``mask`` (B, K) marking which
+    entries of the padded (B, K) logit matrix are real options.
+    """
 
     def __init__(self, inputs: list[dict[str, np.ndarray]], **extra: np.ndarray):
         self.n = len(inputs)
         self.fixed = {k: torch.from_numpy(np.stack([x[k] for x in inputs])) for k in FIXED}
         self.counts = np.array([len(x["opt_card"]) for x in inputs])
         self.offsets = np.concatenate([[0], np.cumsum(self.counts)[:-1]])
-        pad = {"opt_feats": np.zeros((1, OPTION_FEATURES), inputs[0]["opt_feats"].dtype),
-               "opt_card": np.zeros(1, np.int16), "opt_slot": np.full(1, NO_SLOT, np.int16),
-               "opt_attack": np.zeros(1, np.int16)}
-        self.options = {k: torch.from_numpy(np.concatenate([x[k] for x in inputs] + [pad[k]])) for k in OPTION}
-        self.pad_row = int(self.counts.sum())
+        self.options = {k: torch.from_numpy(np.concatenate([x[k] for x in inputs])) for k in OPTION}
         self.extra = {k: torch.as_tensor(v) for k, v in extra.items()}
 
     def __len__(self) -> int:
@@ -125,14 +128,14 @@ class Buffer:
 
     def batch(self, idx: np.ndarray) -> dict[str, torch.Tensor]:
         counts = self.counts[idx]
-        width = np.arange(counts.max())
-        mask = width[None, :] < counts[:, None]
-        rows = torch.from_numpy(np.where(mask, self.offsets[idx][:, None] + width[None, :], self.pad_row))
+        starts = np.cumsum(counts) - counts  # where each decision's options start in the batch
+        rows = torch.from_numpy(np.repeat(self.offsets[idx] - starts, counts) + np.arange(counts.sum()))
         t = torch.from_numpy(idx)
         b = {k: v[t] for k, v in self.fixed.items()}
         b.update({k: v[rows] for k, v in self.options.items()})
         for k in b:
             b[k] = b[k].float() if b[k].is_floating_point() else b[k].long()
-        b["mask"] = torch.from_numpy(mask)
+        b["opt_batch"] = torch.from_numpy(np.repeat(np.arange(len(idx)), counts))
+        b["mask"] = torch.from_numpy(np.arange(counts.max())[None, :] < counts[:, None])
         b.update({k: v[t] for k, v in self.extra.items()})
         return b

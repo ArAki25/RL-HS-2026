@@ -35,11 +35,30 @@ ist zum lokalen Spielen nicht nötig. PyTorch (CPU reicht) wird nur fürs Traini
 # Zwei Agents gegeneinander spielen lassen (Seiten wechseln jede Partie)
 .venv\Scripts\python -m ptcg.evaluate rl heuristic --model-a models/ppo/model.npz --games 1000 --workers 10
 
+# Zuschauen, wie der Bot spielt -> replays/rl_vs_heuristic.html (+ .txt mit Spielprotokoll)
+.venv\Scripts\python -m ptcg.replay rl heuristic --model-a models/ppo/model.npz
+
+# Selbst gegen den Bot spielen (Terminal)
+.venv\Scripts\python -m ptcg.play --opponent rl --model models/ppo/best.npz
+
 # Abgabe bauen -> dist/submission.tar.gz
 .venv\Scripts\python -m ptcg.build_submission --agent rl --model models/ppo/model.npz
 
 # Abgabe mit dem offiziellen Kaggle-Runner testen und ein HTML-Replay speichern
 .venv\Scripts\python -m ptcg.check_submission dist/submission.tar.gz --replay replays/check.html
+```
+
+`ptcg.replay` erzeugt zwei Dateien: ein HTML-Replay mit dem offiziellen Visualizer der Kaggle-Umgebung
+(im Browser öffnen, Zug für Zug durchklicken) und ein Textprotokoll aller Entscheidungen. Für den
+RL-Agenten steht dort zusätzlich, welche Gewinnchance er sich gerade gibt und welche drei Optionen er
+für am besten hält, z.B.
+
+```text
+turn  5 | rl (A)    | main | win chance 64%
+      71%  Attack Frost Barrier (200)
+      18%  Attach Basic {W} Energy -> my bench 1 Snover
+       6%  End turn
+  -> Attack Frost Barrier (200)
 ```
 
 Der PPO-Lauf schreibt pro Iteration eine Zeile nach `models/ppo/log.csv` (Belohnung je Gegnertyp,
@@ -58,6 +77,8 @@ in `models/ppo/snapshots/` ab.
 | `ptcg/rollout.py` | Partien in Worker-Prozessen: Demonstrationen der Heuristik und Self-Play |
 | `ptcg/train.py` | Training: Behavior Cloning (`bc`) und PPO mit Gegner-Pool (`ppo`) |
 | `ptcg/make_decks.py` | Erzeugt einfache Themen-Decks pro Energietyp als Trainingsgegner |
+| `ptcg/play.py` | Mensch gegen Bot im Terminal (Spielfeld als Text, Optionen nummeriert) |
+| `ptcg/replay.py` | HTML-Replay einer Partie und Spielprotokoll mit den Wahrscheinlichkeiten des RL-Agenten |
 | `ptcg/enums.py` | Konstanten der Engine-API ([Doku](https://matsuoinstitute.github.io/cabt/)) |
 | `ptcg/evaluate.py` | Gewinnrate zweier Agents mit Konfidenzintervall |
 | `ptcg/build_submission.py`, `ptcg/check_submission.py` | Abgabe bauen und testen |
@@ -115,7 +136,9 @@ darüber = Policy), der Value-Kopf schätzt die Gewinnchance in [−1, 1]. ~0,67
 
 Die Abgabe enthält nur numpy-Code: `model.py` exportiert die Gewichte als `.npz`, `policy.py` rechnet
 denselben Forward-Pass in numpy (beim Export wird geprüft, dass beide übereinstimmen). Eine Entscheidung
-dauert ~1 ms, die 600 s Zeitreserve pro Match sind also kein Problem. Gespielt wird greedy (beste Option).
+dauert ~1 ms, die 600 s Zeitreserve pro Match sind also kein Problem. Gespielt wird greedy: die
+wahrscheinlichste Aktion, wobei identische Optionen (z.B. zwei gleiche Karten im Deck) ihre
+Wahrscheinlichkeit teilen und deshalb zusammengezählt werden.
 
 ### Nicht umgesetzt: Suche
 
@@ -129,3 +152,19 @@ Suche (z.B. MCTS mit dem Value-Netz) wäre der nächste Schritt, sobald der Wrap
 | Agent | Gegner | Gewinnrate |
 | --- | --- | --- |
 | `heuristic` | `random` | 89 % ± 3 % (400 Partien, gleiches Deck) |
+| `rl` (Behavior Cloning, `models/bc`) | `heuristic` | 49 % ± 4 % (600 Partien, Spiegelmatch) |
+| `rl` (Behavior Cloning, `models/bc`) | `random` | 88 % ± 3 % (400 Partien, Spiegelmatch) |
+
+| `rl` (PPO, 300 Iterationen, letztes Modell) | `heuristic` | **81 % ± 2 %** (1000 Partien, Spiegelmatch) |
+| `rl` (PPO, bestes Modell der Evaluationen, Iteration 220) | `heuristic` | 78 % ± 3 % (1000 Partien; in der Evaluation während des Trainings 84,5 % bei 200 Partien) |
+| `rl` (PPO, 300 Iterationen, letztes Modell) | `random` | 97 % ± 2 % (400 Partien, Spiegelmatch) |
+
+Das Modell mit der besten Trainings-Evaluation ist nicht automatisch das beste: Bei nur 200 Partien
+pro Messung (±7 %) wählt man mit dem Maximum eher einen Ausreißer. Für die Abgabe (`models/ppo/model.npz`)
+wurde deshalb das letzte Modell verwendet, nachdem beide mit je 1000 Partien nachgemessen wurden.
+
+PPO-Verlauf (Gewinnrate gegen die Heuristik, 200 Spiele je Messung): 53 % (Iteration 10) → 65 % (90) →
+75–80 % (120–200) → 80–84 % (220–300).
+
+Behavior Cloning: 2000 Demonstrationspartien (155k Entscheidungen), 6 Epochen, 94 % der Züge der
+Heuristik werden auf neuen Partien exakt getroffen.

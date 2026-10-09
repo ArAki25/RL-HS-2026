@@ -76,7 +76,7 @@ def bc(args) -> None:
             inputs += x
             labels += y
             outcomes += z
-        print(f"{args.games} demonstration games, {len(inputs)} decisions ({time.time() - start:.0f}s)")
+        print(f"{args.games} demonstration games, {len(inputs)} decisions ({time.time() - start:.0f}s)", flush=True)
 
         buffer = Buffer(inputs, action=np.array(labels), outcome=np.array(outcomes, np.float32))
         check = inputs[:200]
@@ -106,13 +106,13 @@ def bc(args) -> None:
                     correct += (logits.argmax(1) == b["action"]).sum().item()
                     value_loss += F.mse_loss(value, b["outcome"], reduction="sum").item()
             print(f"epoch {epoch + 1}: validation accuracy {correct / len(val):.1%}, "
-                  f"value MSE {value_loss / len(val):.3f} ({time.time() - start:.0f}s)")
+                  f"value MSE {value_loss / len(val):.3f} ({time.time() - start:.0f}s)", flush=True)
 
         _save(model, tables, out, "model", check)
         weights = model.numpy_weights()
         for opponent in ("heuristic", "random"):
             rate = evaluate(pool, weights, deck, eval_decks, args.eval_games, args.workers, opponent)
-            print(f"greedy BC policy vs {opponent}: win rate {rate:.1%} ({args.eval_games} games)")
+            print(f"greedy BC policy vs {opponent}: win rate {rate:.1%} ({args.eval_games} games)", flush=True)
     print(f"saved {out / 'model.pt'} and {out / 'model.npz'}")
 
 

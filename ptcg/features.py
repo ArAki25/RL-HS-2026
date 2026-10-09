@@ -230,23 +230,23 @@ class Encoder:
         card, slot, attack, energy = 0, NO_SLOT, 0, None
 
         if kind in (OptionType.ATTACH, OptionType.EVOLVE):
-            card = _id(_zone_card(players[0], obs, AreaType.HAND, option.get("index")))
+            card = _id(zone_card(players[0], obs, AreaType.HAND, option.get("index")))
             slot = _slot(0, option.get("inPlayArea"), option.get("inPlayIndex"))
         elif kind == OptionType.PLAY:
-            card = _id(_zone_card(players[0], obs, AreaType.HAND, option.get("index")))
+            card = _id(zone_card(players[0], obs, AreaType.HAND, option.get("index")))
         elif kind == OptionType.ATTACK:
             attack = option.get("attackId") or 0
         elif kind == OptionType.SKILL:
             card = option.get("cardId") or 0
         elif kind == OptionType.ENERGY:
             slot = _slot(side, area, option.get("index"))
-            poke = _zone_card(players[side], obs, area, option.get("index"))
+            poke = zone_card(players[side], obs, area, option.get("index"))
             energies = (poke or {}).get("energies") or []
             idx = option.get("energyIndex")
             energy = energies[idx] if idx is not None and idx < len(energies) else None
         elif area is not None:
             slot = _slot(side, area, option.get("index"))
-            card = _id(_zone_card(players[side], obs, area, option.get("index")))
+            card = _id(zone_card(players[side], obs, area, option.get("index")))
 
         cdata = self.t.cards.get(card)
         row = [
@@ -278,7 +278,8 @@ def _slot(side: int, area, index) -> int:
     return NO_SLOT
 
 
-def _zone_card(player: dict, obs: dict, area, index):
+def zone_card(player: dict, obs: dict, area, index):
+    """The card (or Pokémon in play) at ``index`` of one of the player's zones, if it exists."""
     if area is None or index is None:
         return None
     zones = {
