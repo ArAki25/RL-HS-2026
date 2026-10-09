@@ -4,5 +4,4 @@ numpy
 jsonschema
 requests
 termcolor
-# Training only (python -m ptcg.train); the submission runs the trained network with numpy.
-torch
+pytorch
