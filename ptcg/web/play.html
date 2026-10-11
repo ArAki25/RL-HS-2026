@@ -1,0 +1,210 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>PTCG Trainer</title>
+<style>
+  :root {
+    --bg: #f6f7f9; --panel: #ffffff; --text: #1d2330; --muted: #667085; --line: #e2e5ea;
+    --accent: #2f6fde; --accent-text: #ffffff; --you: #e9f1ff; --opp: #fdeeee;
+    --hp: #2e9d5b; --hp-low: #d64545; --chip: #eef0f4;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #12151b; --panel: #1b2029; --text: #e6e8ec; --muted: #9098a8; --line: #2c3340;
+      --accent: #5b8ff0; --accent-text: #0d1117; --you: #1c2a44; --opp: #3a2226;
+      --hp: #4cc47f; --hp-low: #f06a6a; --chip: #262d39;
+    }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text); font: 14px/1.4 system-ui, -apple-system, "Segoe UI", sans-serif; }
+  header { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; padding: 10px 16px; background: var(--panel); border-bottom: 1px solid var(--line); }
+  header h1 { font-size: 16px; margin: 0 8px 0 0; }
+  header .stat { color: var(--muted); }
+  button, select { font: inherit; padding: 6px 12px; border-radius: 6px; border: 1px solid var(--line); background: var(--panel); color: var(--text); cursor: pointer; }
+  button.primary { background: var(--accent); color: var(--accent-text); border-color: var(--accent); }
+  button:disabled { opacity: .5; cursor: default; }
+  main { display: grid; grid-template-columns: minmax(0, 1fr) 360px; gap: 16px; padding: 16px; }
+  @media (max-width: 900px) { main { grid-template-columns: 1fr; } }
+  .side { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 12px; }
+  .side.you { background: var(--you); }
+  .side.opp { background: var(--opp); }
+  .side h2 { font-size: 13px; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); margin: 0 0 8px; display: flex; gap: 12px; flex-wrap: wrap; }
+  .row { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 8px; }
+  .slot-label { font-size: 12px; color: var(--muted); margin: 4px 0; }
+  .card { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 6px 8px; width: 150px; min-height: 64px; cursor: help; }
+  .card.active { width: 190px; border-width: 2px; }
+  .card .name { font-weight: 600; }
+  .bar { height: 6px; background: var(--line); border-radius: 3px; margin: 4px 0; overflow: hidden; }
+  .bar > div { height: 100%; background: var(--hp); }
+  .bar > div.low { background: var(--hp-low); }
+  .meta { font-size: 12px; color: var(--muted); }
+  .chip { display: inline-block; background: var(--chip); border-radius: 12px; padding: 2px 10px; margin: 2px; cursor: help; font-size: 13px; }
+  .empty { color: var(--muted); font-style: italic; font-size: 13px; }
+  .board { display: flex; flex-direction: column; gap: 12px; min-width: 0; }
+  .panel { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 12px; }
+  .prompt-text { font-weight: 600; margin-bottom: 8px; }
+  .options { display: flex; flex-direction: column; gap: 6px; }
+  .option { text-align: left; display: flex; gap: 8px; align-items: baseline; }
+  .option .key { color: var(--muted); font-size: 12px; min-width: 16px; }
+  .option.selected { border-color: var(--accent); outline: 2px solid var(--accent); }
+  .log { max-height: 340px; overflow-y: auto; font-size: 13px; margin-top: 8px; }
+  .log div { padding: 2px 0; border-bottom: 1px solid var(--line); }
+  .log .you { color: var(--accent); }
+  .error { color: var(--hp-low); margin-top: 8px; }
+  .right { display: flex; flex-direction: column; gap: 12px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>PTCG Trainer</h1>
+  <label>Gegner
+    <select id="opponent">
+      <option value="heuristic">heuristic</option>
+      <option value="random">random</option>
+      <option value="model">model (models/bc.npz)</option>
+    </select>
+  </label>
+  <button class="primary" id="new">Neue Partie</button>
+  <span class="stat" id="score"></span>
+  <span class="stat" id="recorded"></span>
+</header>
+<main>
+  <div class="board" id="board"><div class="panel empty">Starte eine neue Partie.</div></div>
+  <div class="right">
+    <div class="panel">
+      <div id="prompt"><div class="empty">Kein Zug offen.</div></div>
+      <div class="error" id="error"></div>
+    </div>
+    <div class="panel">
+      <strong>Verlauf</strong>
+      <div class="log" id="log"></div>
+    </div>
+  </div>
+</main>
+<script>
+const $ = (id) => document.getElementById(id);
+let state = null;
+let chosen = [];
+
+function esc(s) {
+  return String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+}
+
+async function api(path, body) {
+  const res = await fetch(path, body === undefined ? {} : {
+    method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
+  });
+  const data = await res.json();
+  $("error").textContent = data.error || "";
+  if (data.score) render(data);
+}
+
+function pokemonHtml(p, active) {
+  const pct = p.maxHp ? Math.max(0, Math.min(100, (100 * p.hp) / p.maxHp)) : 0;
+  const tools = p.tools.length ? ` · ${esc(p.tools.join(", "))}` : "";
+  return `<div class="card${active ? " active" : ""}" title="${esc(p.text)}">
+    <div class="name">${esc(p.name)}</div>
+    <div class="bar"><div class="${pct <= 30 ? "low" : ""}" style="width:${pct}%"></div></div>
+    <div class="meta">${p.hp}/${p.maxHp} KP · Energie: ${esc(p.energies) || "–"}${tools}</div>
+  </div>`;
+}
+
+function playerHtml(p, who, isYou) {
+  const status = p.status.length ? ` · Status: ${p.status.join(", ")}` : "";
+  const active = p.active.map((x) => pokemonHtml(x, true)).join("") || `<div class="empty">kein aktives Pokémon</div>`;
+  const bench = p.bench.map((x) => pokemonHtml(x, false)).join("") || `<div class="empty">Bank leer</div>`;
+  const hand = p.hand
+    ? p.hand.map((c) => `<span class="chip" title="${esc(c.text)}">${esc(c.name)}</span>`).join("") || `<span class="empty">leer</span>`
+    : `<span class="empty">${p.handCount} verdeckte Karten</span>`;
+  const discard = p.discard.length
+    ? p.discard.map((c) => `<span class="chip" title="${esc(c.text)}">${esc(c.name)}</span>`).join("")
+    : `<span class="empty">leer</span>`;
+  return `<section class="side ${isYou ? "you" : "opp"}">
+    <h2><span>${who}</span><span>Preiskarten ${p.prizes}</span><span>Deck ${p.deckCount}</span><span>Hand ${p.handCount}</span>${status ? `<span>${esc(status.slice(3))}</span>` : ""}</h2>
+    <div class="slot-label">Aktiv</div><div class="row">${active}</div>
+    <div class="slot-label">Bank (${p.bench.length}/${p.benchMax})</div><div class="row">${bench}</div>
+    <div class="slot-label">Hand</div><div>${hand}</div>
+    <details><summary class="slot-label">Ablagestapel (${p.discard.length})</summary><div>${discard}</div></details>
+  </section>`;
+}
+
+function render(data) {
+  state = data;
+  chosen = [];
+  const s = data.score;
+  $("score").textContent = `Siege ${s.wins} · Niederlagen ${s.losses}${s.draws ? ` · Unentschieden ${s.draws}` : ""}`;
+  $("recorded").textContent = data.recording ? `Aufgezeichnete Entscheidungen: ${data.recorded}` : "Aufzeichnung aus";
+  if (data.opponent && [...$("opponent").options].some((o) => o.value === data.opponent)) $("opponent").value = data.opponent;
+
+  if (data.board) {
+    const b = data.board;
+    $("board").innerHTML =
+      playerHtml(b.opponent, "Gegner", false) +
+      `<div class="panel meta">Zug ${b.turn}${b.stadium ? ` · Stadion: <span class="chip" title="${esc(b.stadium.text)}">${esc(b.stadium.name)}</span>` : ""}</div>` +
+      playerHtml(b.you, "Du", true);
+  }
+  renderPrompt();
+  $("log").innerHTML = data.log.map((l) => `<div class="${l.startsWith("Du:") ? "you" : ""}">${esc(l)}</div>`).join("");
+  $("log").scrollTop = $("log").scrollHeight;
+}
+
+function isMulti(p) {
+  return p.max > 1 || p.min === 0;
+}
+
+// Indices of the options to show. Identical choices (e.g. one per copy of an energy card in hand)
+// are shown once when only one option is picked; picking several needs every copy.
+function visibleOptions(p) {
+  const all = p.options.map((_, i) => i);
+  if (isMulti(p)) return all;
+  const seen = new Set();
+  return all.filter((i) => !seen.has(p.options[i].label) && seen.add(p.options[i].label));
+}
+
+function renderPrompt() {
+  const p = state.prompt;
+  if (!p) {
+    $("prompt").innerHTML = `<div class="empty">${state.running ? "Bot ist am Zug …" : "Partie beendet. Starte eine neue."}</div>`;
+    return;
+  }
+  const multi = isMulti(p);
+  const range = p.min === p.max ? `${p.min}` : `${p.min}–${p.max}`;
+  const buttons = visibleOptions(p).map((i, pos) =>
+    `<button class="option${chosen.includes(i) ? " selected" : ""}" data-i="${i}" title="${esc(p.options[i].text)}">
+      <span class="key">${pos < 9 ? pos + 1 : ""}</span><span>${esc(p.options[i].label)}</span></button>`).join("");
+  const confirm = multi
+    ? `<div class="row" style="margin-top:8px"><button class="primary" id="confirm" ${chosen.length < p.min || chosen.length > p.max ? "disabled" : ""}>Bestätigen (${chosen.length} gewählt)</button></div>`
+    : "";
+  $("prompt").innerHTML = `<div class="prompt-text">${esc(p.text)}</div>
+    ${multi ? `<div class="meta" style="margin-bottom:6px">Wähle ${range} Option(en).</div>` : ""}
+    <div class="options">${buttons}</div>${confirm}`;
+  document.querySelectorAll(".option").forEach((el) => el.addEventListener("click", () => pick(Number(el.dataset.i))));
+  if (multi) $("confirm").addEventListener("click", () => api("/api/select", { indices: chosen }));
+}
+
+function pick(i) {
+  const p = state.prompt;
+  if (!p) return;
+  if (isMulti(p)) {
+    chosen = chosen.includes(i) ? chosen.filter((x) => x !== i) : chosen.length < p.max ? [...chosen, i] : chosen;
+    renderPrompt();
+  } else {
+    api("/api/select", { indices: [i] });
+  }
+}
+
+document.addEventListener("keydown", (e) => {
+  if (!state || !state.prompt || e.target.tagName === "SELECT") return;
+  const n = Number(e.key);
+  const visible = visibleOptions(state.prompt);
+  if (n >= 1 && n <= 9 && n <= visible.length) pick(visible[n - 1]);
+  if (e.key === "Enter" && $("confirm") && !$("confirm").disabled) $("confirm").click();
+});
+
+$("new").addEventListener("click", () => api("/api/new", { opponent: $("opponent").value }));
+api("/api/state");
+</script>
+</body>
+</html>

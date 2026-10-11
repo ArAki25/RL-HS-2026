@@ -18,8 +18,11 @@ with open(os.path.join(_DIR, "deck.csv")) as f:
     DECK = [int(line) for line in f if line.strip()]
 with open(os.path.join(_DIR, "bundle.json"), encoding="utf-8") as f:
     _bundle = json.load(f)
+_name = _bundle["agent"]
+if _name == "model":
+    _name = "model:" + os.path.join(_DIR, "model.npz")
 _agent = make_agent(
-    _bundle["agent"],
+    _name,
     {c["cardId"]: c for c in _bundle["cards"]},
     {a["attackId"]: a for a in _bundle["attacks"]},
 )

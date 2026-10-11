@@ -5,9 +5,11 @@ This module is bundled into the Kaggle submission, so it must not import the eng
 
 from __future__ import annotations
 
+import os
 import random
 
 from .enums import AreaType, CardType, OptionType, SelectContext
+from .observation import resolve_card
 
 # Contexts where choosing as few options as possible is best (cards leave our control).
 FEWER_IS_BETTER = {
@@ -40,6 +42,14 @@ MAIN_PLAY_SCORE = {
 }
 
 
+def pick_best(scores, select: dict) -> list[int]:
+    """Indices of the highest-scoring options; as few as allowed where cards leave our control."""
+    order = sorted(range(len(scores)), key=scores.__getitem__, reverse=True)
+    fewer = select["context"] in FEWER_IS_BETTER
+    count = select["minCount"] if fewer else select["maxCount"]
+    return order[: max(select["minCount"], min(count, len(scores)))]
+
+
 class RandomAgent:
     """Uniformly random legal move (same as the built-in Kaggle "random" agent)."""
 
@@ -59,11 +69,7 @@ class HeuristicAgent:
     def __call__(self, obs: dict) -> list[int]:
         select = obs["select"]
         options = select["option"]
-        scores = [self._score(option, obs) for option in options]
-        order = sorted(range(len(options)), key=scores.__getitem__, reverse=True)
-        fewer = select["context"] in FEWER_IS_BETTER
-        count = select["minCount"] if fewer else select["maxCount"]
-        return order[: max(select["minCount"], min(count, len(options)))]
+        return pick_best([self._score(option, obs) for option in options], select)
 
     def _score(self, option: dict, obs: dict) -> float:
         kind = option["type"]
@@ -95,7 +101,7 @@ class HeuristicAgent:
         current = obs["current"]
         me = current["yourIndex"]
         owner = option.get("playerIndex", me)
-        card = _resolve(option, obs)
+        card = resolve_card(option, obs)
         if card is None:
             return 0
         if option.get("area") in (AreaType.ACTIVE, AreaType.BENCH) and "hp" in card:
@@ -112,28 +118,35 @@ class HeuristicAgent:
         return value if owner == me else -value
 
 
-def _resolve(option: dict, obs: dict) -> dict | None:
-    """Return the card (or in-play Pokémon) an option refers to, if it can be found."""
-    area, index = option.get("area"), option.get("index")
-    if area is None or index is None:
-        return None
-    current = obs["current"]
-    player = current["players"][option.get("playerIndex", current["yourIndex"])]
-    zones = {
-        AreaType.DECK: obs["select"].get("deck"),
-        AreaType.HAND: player["hand"],
-        AreaType.DISCARD: player["discard"],
-        AreaType.ACTIVE: player["active"],
-        AreaType.BENCH: player["bench"],
-        AreaType.LOOKING: current.get("looking"),
-    }
-    zone = zones.get(area)
-    if not zone or index >= len(zone):
-        return None
-    return zone[index]
+class ModelAgent:
+    """Learned agent: scores every option with the network trained by ``ptcg.train_bc``."""
+
+    def __init__(self, cards: dict[int, dict], attacks: dict[int, dict], path: str):
+        from .features import Encoder
+        from .policy import NumpyPolicy
+
+        self.encoder = Encoder(cards, attacks)
+        self.policy = NumpyPolicy.load(path)
+        if (self.policy.state_dim, self.policy.option_dim) != (self.encoder.state_dim, self.encoder.option_dim):
+            raise ValueError(f"{path} was trained with different features; retrain it")
+
+    def __call__(self, obs: dict) -> list[int]:
+        select = obs["select"]
+        if len(select["option"]) == 1:
+            return pick_best([0.0], select)
+        state, options = self.encoder.encode(obs)
+        return pick_best(list(self.policy.scores(state, options)), select)
 
 
-AGENTS = ["random", "heuristic"]
+AGENTS = ["random", "heuristic", "model"]
+DEFAULT_MODEL = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "models", "bc.npz")
+
+
+def agent_name(name: str) -> str:
+    """argparse type for agent names: one of AGENTS, or "model:<path to .npz>"."""
+    if name in AGENTS or name.startswith("model:"):
+        return name
+    raise ValueError(f"unknown agent {name!r}, choose from {AGENTS} or model:<path>")
 
 
 def make_agent(name: str, cards: dict[int, dict], attacks: dict[int, dict]):
@@ -141,4 +154,6 @@ def make_agent(name: str, cards: dict[int, dict], attacks: dict[int, dict]):
         return RandomAgent()
     if name == "heuristic":
         return HeuristicAgent(cards, attacks)
-    raise ValueError(f"unknown agent {name!r}, choose from {AGENTS}")
+    if name == "model" or name.startswith("model:"):
+        return ModelAgent(cards, attacks, name.partition(":")[2] or DEFAULT_MODEL)
+    raise ValueError(f"unknown agent {name!r}, choose from {AGENTS} or model:<path>")

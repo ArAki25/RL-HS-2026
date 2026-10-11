@@ -4,4 +4,7 @@ numpy
 jsonschema
 requests
 termcolor
-pytorch
+# Training only (not needed by the submission). CPU build:
+#   pip install torch --index-url https://download.pytorch.org/whl/cpu
+torch
+tensorboard
