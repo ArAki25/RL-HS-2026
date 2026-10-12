@@ -170,10 +170,7 @@ class Session:
                 "text": self.describer.prompt(self.obs),
                 "min": select["minCount"],
                 "max": select["maxCount"],
-                "options": [
-                    {"label": self.describer.option(o, self.obs), "text": self.describer.option_text(o, self.obs)}
-                    for o in select["option"]
-                ],
+                "options": [self.describer.option_view(o, self.obs) for o in select["option"]],
             }
         return view
 

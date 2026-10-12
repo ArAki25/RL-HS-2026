@@ -28,6 +28,28 @@ CARD_TYPE_NAMES = {
     CardType.SPECIAL_ENERGY: "Spezial-Energie",
 }
 
+CARD_KINDS = {
+    CardType.POKEMON: "pokemon",
+    CardType.ITEM: "item",
+    CardType.TOOL: "tool",
+    CardType.SUPPORTER: "supporter",
+    CardType.STADIUM: "stadium",
+    CardType.BASIC_ENERGY: "energy",
+    CardType.SPECIAL_ENERGY: "energy",
+}
+
+# Areas as the play page names them; option references point into these zones.
+ZONES = {
+    AreaType.DECK: "deck",
+    AreaType.HAND: "hand",
+    AreaType.DISCARD: "discard",
+    AreaType.ACTIVE: "active",
+    AreaType.BENCH: "bench",
+    AreaType.PRIZE: "prize",
+    AreaType.STADIUM: "stadium",
+    AreaType.LOOKING: "looking",
+}
+
 CONTEXT_PROMPTS = {
     SelectContext.MAIN: "Dein Zug: wähle eine Aktion",
     SelectContext.SETUP_ACTIVE_POKEMON: "Wähle dein aktives Pokémon",
@@ -59,7 +81,7 @@ class Describer:
         self.cards = cards
         self.attacks = attacks
         # Energy type -> symbol, read from basic energy names like "Basic {W} Energy".
-        self.energy_symbols = {0: "C"}
+        self.energy_symbols = {0: "C", 9: "N"}
         for c in cards.values():
             match = re.search(r"\{(\w)\}", c["name"])
             if c["cardType"] == CardType.BASIC_ENERGY and match:
@@ -88,20 +110,55 @@ class Describer:
             lines.append(f"[{self.energies(a['energies'])}] {a['name']} {a['damage'] or ''} {a['text']}".strip())
         return "\n".join(lines)
 
+    def card_info(self, card_id: int | None) -> dict:
+        """Everything the page needs to draw a card."""
+        c = self.cards.get(card_id)
+        if c is None:
+            return {"id": None, "name": "verdeckt", "kind": "hidden", "text": ""}
+        info = {
+            "id": card_id,
+            "name": c["name"],
+            "kind": CARD_KINDS.get(c["cardType"], "item"),
+            "kindName": CARD_TYPE_NAMES.get(c["cardType"], ""),
+            "text": self.card_text(card_id),
+            "skills": [{"name": s["name"], "text": s["text"]} for s in c["skills"]],
+        }
+        if c["cardType"] in (CardType.POKEMON, CardType.BASIC_ENERGY, CardType.SPECIAL_ENERGY):
+            info["type"] = self.energy_symbols.get(c["energyType"], "C")
+        if c["cardType"] == CardType.POKEMON:
+            info.update(
+                hp=c["hp"],
+                stage="Phase 2" if c["stage2"] else "Phase 1" if c["stage1"] else "Basis",
+                evolvesFrom=c["evolvesFrom"],
+                ex=c["ex"] or c["megaEx"],
+                weakness=self.energy_symbols.get(c["weakness"]) if c["weakness"] is not None else None,
+                resistance=self.energy_symbols.get(c["resistance"]) if c["resistance"] is not None else None,
+                retreat=c["retreatCost"],
+                attacks=[
+                    {
+                        "name": a["name"],
+                        "cost": self.energies(a["energies"]),
+                        "damage": a["damage"],
+                        "text": a["text"],
+                    }
+                    for a in (self.attacks[i] for i in c["attacks"] if i in self.attacks)
+                ],
+            )
+        return info
+
     def card(self, card: dict | None) -> dict:
-        if card is None:
-            return {"name": "verdeckt", "text": "", "id": None}
-        return {"name": self.name(card["id"]), "text": self.card_text(card["id"]), "id": card["id"]}
+        return self.card_info(card["id"] if card else None)
 
     def pokemon(self, p: dict | None) -> dict:
         if p is None:  # face down during setup
-            return {**self.card(None), "hp": 0, "maxHp": 0, "energies": "", "tools": []}
+            return self.card(None)
         return {
             **self.card(p),
             "hp": p["hp"],
             "maxHp": p["maxHp"],
             "energies": self.energies(p["energies"]),
-            "tools": [self.name(t["id"]) for t in p["tools"]],
+            "tools": [self.card(t) for t in p["tools"]],
+            "newThisTurn": bool(p.get("appearThisTurn")),
         }
 
     def player(self, player: dict) -> dict:
@@ -192,6 +249,8 @@ class Describer:
             return f"Entwickeln: {target()} → {hand_card()}"
         if kind == OptionType.ABILITY:
             pokemon = resolve_card(option, obs)
+            if option.get("area") == AreaType.STADIUM:
+                return f"Stadion nutzen: {self.name(pokemon['id']) if pokemon else '?'}"
             card = self.cards.get(pokemon["id"]) if pokemon else None
             skill = card["skills"][0]["name"] if card and card["skills"] else "Fähigkeit"
             return f"Fähigkeit: {skill} ({self.name(pokemon['id']) if pokemon else '?'})"
@@ -212,19 +271,35 @@ class Describer:
             return "Spezialzustand"
         return f"Option {kind}"
 
-    def option_text(self, option: dict, obs: dict) -> str:
-        """Tooltip for an option: the text of the card it refers to."""
+    def option_view(self, option: dict, obs: dict) -> dict:
+        """Label, tooltip, the card it is about and the board places it refers to (for highlighting)."""
         kind = option["type"]
-        card = None
+        me = obs["current"]["yourIndex"]
+        side = "you" if option.get("playerIndex", me) == me else "opponent"
+        refs: list[dict] = []
+        card_id = None
+        text = ""
         if kind in (OptionType.PLAY, OptionType.ATTACH, OptionType.EVOLVE):
-            hand = obs["current"]["players"][obs["current"]["yourIndex"]].get("hand") or []
+            hand = obs["current"]["players"][me].get("hand") or []
             i = option.get("index")
-            card = hand[i] if i is not None and i < len(hand) else None
-        elif kind == OptionType.ATTACK:
-            a = self.attacks.get(option["attackId"])
-            return a["text"] if a else ""
+            card_id = hand[i]["id"] if i is not None and i < len(hand) else None
+            refs.append({"side": "you", "zone": "hand", "index": i})
+            if kind != OptionType.PLAY:
+                refs.append({"side": "you", "zone": ZONES.get(option["inPlayArea"]), "index": option["inPlayIndex"]})
+        elif kind in (OptionType.ATTACK, OptionType.RETREAT):
+            refs.append({"side": "you", "zone": "active", "index": 0})
+            attack = self.attacks.get(option.get("attackId"))
+            text = attack["text"] if attack else ""
         elif kind == OptionType.SKILL:
-            return self.card_text(option.get("cardId"))
-        else:
-            card = resolve_card(option, obs)
-        return self.card_text(card["id"]) if card else ""
+            card_id = option.get("cardId")
+        elif option.get("area") is not None:
+            refs.append({"side": side, "zone": ZONES.get(option["area"]), "index": option.get("index")})
+            card = resolve_energy(option, obs) if kind == OptionType.ENERGY else resolve_card(option, obs)
+            card_id = card["id"] if card else None
+        card = self.card_info(card_id) if card_id is not None else None
+        return {
+            "label": self.option(option, obs),
+            "text": text or (card["text"] if card else ""),
+            "refs": refs,
+            "card": card,
+        }

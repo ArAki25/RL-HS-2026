@@ -19,6 +19,7 @@ def resolve_card(option: dict, obs: dict) -> dict | None:
         AreaType.ACTIVE: player["active"],
         AreaType.BENCH: player["bench"],
         AreaType.PRIZE: player["prize"],
+        AreaType.STADIUM: current.get("stadium"),
         AreaType.LOOKING: current.get("looking"),
     }
     zone = zones.get(area)
