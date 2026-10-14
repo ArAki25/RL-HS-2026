@@ -13,11 +13,18 @@ import tarfile
 from pathlib import Path
 
 from . import engine
-from .agents import AGENTS
+from .agents import agent_name
 
 ROOT = Path(__file__).resolve().parent.parent
 # Only engine-free modules go into the submission.
-PACKAGE_FILES = ["ptcg/__init__.py", "ptcg/enums.py", "ptcg/agents.py", "ptcg/features.py", "ptcg/policy.py"]
+PACKAGE_FILES = [
+    "ptcg/__init__.py",
+    "ptcg/enums.py",
+    "ptcg/observation.py",
+    "ptcg/agents.py",
+    "ptcg/features.py",
+    "ptcg/policy.py",
+]
 
 
 def _add_text(tar: tarfile.TarFile, name: str, text: str) -> None:
@@ -29,6 +36,8 @@ def _add_text(tar: tarfile.TarFile, name: str, text: str) -> None:
 
 def build(agent: str, deck_path: Path, out: Path, model: Path | None = None) -> Path:
     deck = engine.load_deck(deck_path)
+    if agent.startswith("rl:"):  # rl:<path> picks the weights, like in the other tools
+        model, agent = Path(agent.partition(":")[2]), "rl"
     if agent == "rl" and (model is None or not model.is_file()):
         raise SystemExit(f"the rl agent needs a trained model, {model} not found (see python -m ptcg.train)")
     bundle = {
@@ -51,7 +60,7 @@ def build(agent: str, deck_path: Path, out: Path, model: Path | None = None) -> 
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("--agent", choices=AGENTS, default="heuristic")
+    parser.add_argument("--agent", type=agent_name, default="heuristic", help="random, heuristic, rl or rl:<path>")
     parser.add_argument("--deck", type=Path, default=ROOT / "decks" / "abomasnow.csv")
     parser.add_argument("--model", type=Path, default=ROOT / "models" / "ppo" / "model.npz", help="weights for rl")
     parser.add_argument("--out", type=Path, default=ROOT / "dist" / "submission.tar.gz")

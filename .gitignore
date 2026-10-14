@@ -19,6 +19,7 @@ models/
 logs/
 reports/
 data/*.csv
+data/human/
 
 # Submissions and replays
 dist/

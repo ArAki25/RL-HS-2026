@@ -15,7 +15,7 @@ import time
 from pathlib import Path
 
 from . import engine
-from .agents import AGENTS, make_agent
+from .agents import agent_name, make_agent
 from .rollout import make_pool
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -42,8 +42,8 @@ def _play_chunk(name_a: str, name_b: str, deck_a: list[int], deck_b: list[int], 
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("agent_a", choices=AGENTS)
-    parser.add_argument("agent_b", choices=AGENTS)
+    parser.add_argument("agent_a", type=agent_name, help="random, heuristic, rl or rl:<path>")
+    parser.add_argument("agent_b", type=agent_name)
     parser.add_argument("--games", type=int, default=200)
     parser.add_argument("--workers", type=int, default=4)
     parser.add_argument("--deck-a", type=Path, default=DEFAULT_DECK)

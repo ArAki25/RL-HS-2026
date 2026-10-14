@@ -16,7 +16,8 @@ python -m venv .venv
 ```
 
 Die Spiel-Engine (`cg.dll` bzw. `libcg.so`) ist in `kaggle-environments` enthalten, ein Kaggle-Login
-ist zum lokalen Spielen nicht nötig. PyTorch (CPU reicht) wird nur fürs Training gebraucht.
+ist zum lokalen Spielen nicht nötig. PyTorch (CPU reicht, z.B. `pip install torch --index-url https://download.pytorch.org/whl/cpu`) wird nur fürs
+Training gebraucht; die Abgabe rechnet das Netz mit numpy.
 
 ## Nutzung
 
@@ -38,8 +39,8 @@ ist zum lokalen Spielen nicht nötig. PyTorch (CPU reicht) wird nur fürs Traini
 # Zuschauen, wie der Bot spielt -> replays/rl_vs_heuristic.html (+ .txt mit Spielprotokoll)
 .venv\Scripts\python -m ptcg.replay rl heuristic --model-a models/ppo/model.npz
 
-# Selbst gegen den Bot spielen (Terminal)
-.venv\Scripts\python -m ptcg.play --opponent rl --model models/ppo/best.npz
+# Selbst gegen den Bot spielen: Browser-Oberfläche auf http://localhost:8000
+.venv\Scripts\python -m ptcg.play --opponent rl:models/ppo/model.npz
 
 # Abgabe bauen -> dist/submission.tar.gz
 .venv\Scripts\python -m ptcg.build_submission --agent rl --model models/ppo/model.npz
@@ -77,13 +78,26 @@ in `models/ppo/snapshots/` ab.
 | `ptcg/rollout.py` | Partien in Worker-Prozessen: Demonstrationen der Heuristik und Self-Play |
 | `ptcg/train.py` | Training: Behavior Cloning (`bc`) und PPO mit Gegner-Pool (`ppo`) |
 | `ptcg/make_decks.py` | Erzeugt einfache Themen-Decks pro Energietyp als Trainingsgegner |
-| `ptcg/play.py` | Mensch gegen Bot im Terminal (Spielfeld als Text, Optionen nummeriert) |
+| `ptcg/play.py`, `ptcg/describe.py`, `ptcg/web/play.html` | Browser-Spiel Mensch gegen Bot (Klick oder Tasten 1–9, Tooltips mit Kartentext); jede Entscheidung wird in `data/human/*.jsonl` aufgezeichnet |
+| `ptcg/observation.py` | Karten zu einer Option auflösen (von Heuristik und Beschreibung genutzt) |
 | `ptcg/replay.py` | HTML-Replay einer Partie und Spielprotokoll mit den Wahrscheinlichkeiten des RL-Agenten |
 | `ptcg/enums.py` | Konstanten der Engine-API ([Doku](https://matsuoinstitute.github.io/cabt/)) |
 | `ptcg/evaluate.py` | Gewinnrate zweier Agents mit Konfidenzintervall |
 | `ptcg/build_submission.py`, `ptcg/check_submission.py` | Abgabe bauen und testen |
 | `submission/main.py` | Einstiegspunkt der Kaggle-Abgabe |
 | `decks/` | Decklisten (60 Karten-IDs, eine pro Zeile); `abomasnow.csv` ist unser Deck |
+
+## Zwei RL-Bots gegeneinander
+
+Das Ziel des Projekts sind lernende Bots, die gegeneinander spielen und jeweils aktiv gewinnen wollen.
+Das ist der Kern von `ptcg.train ppo`: Im Self-Play spielt die aktuelle Policy gegen sich selbst (beide
+Seiten lernen aus ihrem Spielausgang, Sieg +1 / Niederlage −1) und gegen frühere Snapshots. Zwei
+gespeicherte Modelle lassen sich direkt vergleichen und anschauen:
+
+```powershell
+.venv\Scripts\python -m ptcg.evaluate rl:models/ppo/snapshots/iter_00100.npz rl:models/ppo/model.npz --games 400
+.venv\Scripts\python -m ptcg.replay rl rl --model-a models/ppo/snapshots/iter_00100.npz --model-b models/ppo/model.npz
+```
 
 ## Wie der Bot spielt
 
