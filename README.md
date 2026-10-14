@@ -180,5 +180,23 @@ wurde deshalb das letzte Modell verwendet, nachdem beide mit je 1000 Partien nac
 PPO-Verlauf (Gewinnrate gegen die Heuristik, 200 Spiele je Messung): 53 % (Iteration 10) → 65 % (90) →
 75–80 % (120–200) → 80–84 % (220–300).
 
+### Vergleich: Monte-Carlo-Rückgaben (λ = 1) gegen GAE (λ = 0,95)
+
+Gleicher Startpunkt (BC-Modell), gleiche Parameter, 300 Iterationen; nur `--lam` unterschiedlich.
+
+| Messung (je 1000 Partien) | λ = 0,95 (`models/ppo`) | λ = 1,0 (`models/ppo_mc`) |
+| --- | --- | --- |
+| gegen `heuristic`, letztes Modell | 81 % ± 2 % | 74 % ± 3 % |
+| gegen `heuristic`, bestes Modell der Evaluationen | 78 % ± 3 % | 80 % ± 3 % |
+| direktes Duell (λ = 1,0 gegen λ = 0,95) | | 41 % ± 3 % (letztes) / 42 % ± 3 % (bestes) |
+
+Im direkten Duell gewinnt das λ-0,95-Modell rund 58 % der Partien, beide MC-Kandidaten verlieren außerhalb
+des Konfidenzintervalls. Der Value-Verlust lag beim MC-Lauf durchgehend höher (~0,4 statt ~0,1): Mit nur einer
+Belohnung am Spielende sind die reinen MC-Rückgaben zu verrauscht. Das Projekt bleibt deshalb bei λ = 0,95.
+
+Monte-Carlo-Baumsuche (MCTS) beim Spielen ist nicht umgesetzt: Die Engine hat Suchfunktionen, aber ihre
+Python-Anbindung (`api.py`) fehlt in `kaggle-environments` 1.33.0 und im aktuellen GitHub-Stand. Sie gehört
+vermutlich zum Datenpaket des Wettbewerbs (Kaggle-Login nötig).
+
 Behavior Cloning: 2000 Demonstrationspartien (155k Entscheidungen), 6 Epochen, 94 % der Züge der
 Heuristik werden auf neuen Partien exakt getroffen.
