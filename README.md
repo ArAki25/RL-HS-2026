@@ -78,7 +78,7 @@ in `models/ppo/snapshots/` ab.
 | `ptcg/rollout.py` | Partien in Worker-Prozessen: Demonstrationen der Heuristik und Self-Play |
 | `ptcg/train.py` | Training: Behavior Cloning (`bc`) und PPO mit Gegner-Pool (`ppo`) |
 | `ptcg/make_decks.py` | Erzeugt einfache Themen-Decks pro Energietyp als Trainingsgegner |
-| `ptcg/play.py`, `ptcg/describe.py`, `ptcg/web/play.html` | Browser-Spiel Mensch gegen Bot (Klick oder Tasten 1–9, Tooltips mit Kartentext); jede Entscheidung wird in `data/human/*.jsonl` aufgezeichnet |
+| `ptcg/play.py`, `ptcg/describe.py`, `ptcg/web/play.html` | Browser-Spiel Mensch gegen Bot (Klick oder Tasten 1–9, Tooltips mit Kartentext); dein Deck und das Gegner-Deck sind im Browser wählbar (alle `decks/*.csv`); Angriffe und Fähigkeiten stehen mit Effekttext auf den Karten; jede Entscheidung wird in `data/human/*.jsonl` aufgezeichnet |
 | `ptcg/observation.py` | Karten zu einer Option auflösen (von Heuristik und Beschreibung genutzt) |
 | `ptcg/replay.py` | HTML-Replay einer Partie und Spielprotokoll mit den Wahrscheinlichkeiten des RL-Agenten |
 | `ptcg/enums.py` | Konstanten der Engine-API ([Doku](https://matsuoinstitute.github.io/cabt/)) |

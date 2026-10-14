@@ -2,7 +2,8 @@
 
     python -m ptcg.play --opponent heuristic
 
-Opens http://localhost:8000. Every decision you make is appended to data/human/<time>.jsonl as
+Opens http://localhost:8000. Your deck and the bot's deck can be chosen in the page (every .csv in decks/).
+The rl bot was trained with abomasnow.csv and plays other decks much worse. Every decision you make is appended to data/human/<time>.jsonl as
 {"obs": ..., "action": [...]}, followed by a {"result": ...} line when the game ends.
 The recordings are kept as extra training data for imitation learning.
 """
@@ -26,7 +27,13 @@ ROOT = Path(__file__).resolve().parent.parent
 PAGE = Path(__file__).resolve().parent / "web" / "play.html"
 DEFAULT_DECK = ROOT / "decks" / "abomasnow.csv"
 DEFAULT_DATA = ROOT / "data" / "human"
+DECK_DIR = ROOT / "decks"
 LOG_LIMIT = 300
+
+
+def available_decks() -> list[str]:
+    """Names (without .csv) of the deck files the player can choose from."""
+    return sorted(path.stem for path in DECK_DIR.glob("*.csv"))
 
 
 def count_recorded(data_dir: Path) -> int:
@@ -40,11 +47,13 @@ def count_recorded(data_dir: Path) -> int:
 class Session:
     """One game at a time between the browser player and a bot (the engine is single-game)."""
 
-    def __init__(self, opponent: str, deck: list[int], bot_deck: list[int], data_dir: Path | None):
+    def __init__(self, opponent: str, deck: list[int], bot_deck: list[int], data_dir: Path | None,
+                 deck_name: str = "", bot_deck_name: str = ""):
         self.cards, self.attacks = engine.card_db(), engine.attack_db()
         self.describer = Describer(self.cards, self.attacks)
         self.opponent = opponent
         self.deck, self.bot_deck = deck, bot_deck
+        self.deck_name, self.bot_deck_name = deck_name, bot_deck_name
         self.data_dir = data_dir
         self.recorded = count_recorded(data_dir) if data_dir else 0
         self.score = {"wins": 0, "losses": 0, "draws": 0}
@@ -58,8 +67,21 @@ class Session:
 
     # --- game flow -------------------------------------------------------------------------
 
-    def new_game(self, opponent: str | None = None) -> None:
+    @staticmethod
+    def _load_deck(name: str) -> list[int]:
+        if name not in available_decks():  # only files from decks/, never an arbitrary path
+            raise ValueError(f"unbekanntes Deck {name!r}")
+        return engine.load_deck(DECK_DIR / f"{name}.csv")
+
+    def new_game(self, opponent: str | None = None, deck: str | None = None, bot_deck: str | None = None) -> None:
         self._finish()
+        # Load both decks before changing anything, so a bad name leaves the session as it was.
+        new_deck = self._load_deck(deck) if deck else None
+        new_bot_deck = self._load_deck(bot_deck) if bot_deck else None
+        if deck:
+            self.deck, self.deck_name = new_deck, deck
+        if bot_deck:
+            self.bot_deck, self.bot_deck_name = new_bot_deck, bot_deck
         if opponent:
             self.opponent = opponent
         self.bot = make_agent(self.opponent, self.cards, self.attacks, deck=self.bot_deck)
@@ -71,7 +93,8 @@ class Session:
         self.obs = obs
         self.in_engine = True
         self.running = True
-        self.log = [f"Neue Partie gegen {self.opponent}. Du bist Spieler {self.seat + 1}."]
+        self.log = [f"Neue Partie gegen {self.opponent} (Gegner-Deck {self.bot_deck_name or '?'}, "
+                    f"dein Deck {self.deck_name or '?'}). Du bist Spieler {self.seat + 1}."]
         try:
             if self.data_dir:
                 self.data_dir.mkdir(parents=True, exist_ok=True)
@@ -153,6 +176,9 @@ class Session:
     def view(self) -> dict:
         view = {
             "opponent": self.opponent,
+            "decks": available_decks(),
+            "deck": self.deck_name,
+            "botDeck": self.bot_deck_name,
             "running": self.running,
             "log": self.log,
             "score": self.score,
@@ -203,7 +229,11 @@ def make_handler(session: Session):
             body = json.loads(self.rfile.read(length) or b"{}")
             try:
                 if self.path == "/api/new":
-                    session.new_game(agent_name(body["opponent"]) if body.get("opponent") else None)
+                    session.new_game(
+                        agent_name(body["opponent"]) if body.get("opponent") else None,
+                        body.get("deck") or None,
+                        body.get("botDeck") or None,
+                    )
                 elif self.path == "/api/select":
                     session.select([int(i) for i in body["indices"]])
                 else:
@@ -235,6 +265,8 @@ def main() -> None:
         engine.load_deck(args.deck),
         engine.load_deck(args.bot_deck),
         None if args.no_record else args.data,
+        args.deck.stem,
+        args.bot_deck.stem,
     )
     server = HTTPServer(("127.0.0.1", args.port), make_handler(session))
     url = f"http://localhost:{args.port}"

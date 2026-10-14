@@ -89,6 +89,12 @@
   .atk .an { flex: 1; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .atk .dmg { font-weight: 800; }
   .atk .skill { color: #b3261e; }
+  .atk-block { display: flex; flex-direction: column; gap: 0; }
+  .atk-fx { font-size: .86em; line-height: 1.12; opacity: .85; overflow: hidden; display: -webkit-box;
+    -webkit-line-clamp: 3; -webkit-box-orient: vertical; }
+  .size-l .atk-fx { -webkit-line-clamp: 5; }
+  .c-art.small { flex-basis: 18%; margin: .15em 0; }
+  .c-art.small .big { font-size: 1.5em; }
   .c-text { overflow: hidden; display: -webkit-box; -webkit-line-clamp: 6; -webkit-box-orient: vertical; }
   .c-foot { font-size: .72em; display: flex; justify-content: space-between; gap: .3em; opacity: .85; white-space: nowrap; }
   .c-foot span { display: flex; align-items: center; gap: 1px; }
@@ -147,6 +153,8 @@
       <option value="rl">rl (models/ppo/model.npz)</option>
     </select>
   </label>
+  <label>Dein Deck <select id="deck"></select></label>
+  <label>Gegner-Deck <select id="botDeck"></select></label>
   <button class="primary" id="new">Neue Partie</button>
   <span class="stat" id="score"></span>
   <span class="stat" id="recorded"></span>
@@ -197,15 +205,21 @@ function cardHtml(info, { size = "m", ref = null, inPlay = null, count = null, s
   let inner;
   if (info.kind === "pokemon") {
     const hp = inPlay ? `${inPlay.hp}<small>/${inPlay.maxHp}</small>` : `${info.hp}<small>KP</small>`;
-    const skills = (info.skills || []).map((s) => `<div class="atk"><span class="an skill">✦ ${esc(s.name)}</span></div>`).join("");
+    // Abilities and attacks are always printed on the card: a header line (cost, name, damage) and the
+    // effect text below it in small type.
+    const skills = (info.skills || []).map((s) =>
+      `<div class="atk-block"><div class="atk"><span class="an skill">✦ ${esc(s.name)}</span></div>`
+      + `<div class="atk-fx">${esc(s.text)}</div></div>`).join("");
     const attacks = (info.attacks || []).map((a) =>
-      `<div class="atk"><span class="cost">${energyDots(a.cost)}</span><span class="an">${esc(a.name)}</span><span class="dmg">${a.damage || ""}</span></div>`).join("");
+      `<div class="atk-block"><div class="atk"><span class="cost">${energyDots(a.cost)}</span><span class="an">${esc(a.name)}</span>`
+      + `<span class="dmg">${a.damage || ""}</span></div>`
+      + (a.text ? `<div class="atk-fx">${esc(a.text)}</div>` : "") + `</div>`).join("");
     const weak = info.weakness ? `Schwäche ${energyDots(info.weakness)}` : "";
     const retreat = `Rückzug ${info.retreat ? energyDots("C".repeat(info.retreat)) : "–"}`;
     inner = `
       <div class="c-head"><span class="c-stage">${esc(info.stage)}</span><span class="c-name">${esc(info.name)}</span><span class="c-hp">${hp}</span></div>
       ${inPlay ? hpBar(inPlay) : ""}
-      <div class="c-art"><span class="big">${esc(info.type || "")}</span>${info.ex ? `<span class="tag">ex</span>` : ""}</div>
+      <div class="c-art small"><span class="big">${esc(info.type || "")}</span>${info.ex ? `<span class="tag">ex</span>` : ""}</div>
       <div class="c-body">${skills}${attacks}</div>
       ${inPlay ? "" : `<div class="c-foot"><span>${weak}</span><span>${retreat}</span></div>`}`;
   } else if (info.kind === "energy") {
@@ -425,6 +439,13 @@ function render(data) {
   $("score").textContent = `Siege ${s.wins} · Niederlagen ${s.losses}${s.draws ? ` · Unentschieden ${s.draws}` : ""}`;
   $("recorded").textContent = data.recording ? `Aufgezeichnete Entscheidungen: ${data.recorded}` : "Aufzeichnung aus";
   if (data.opponent && [...$("opponent").options].some((o) => o.value === data.opponent)) $("opponent").value = data.opponent;
+  for (const [id, current] of [["deck", data.deck], ["botDeck", data.botDeck]]) {
+    const select = $(id);
+    if (data.decks && select.options.length !== data.decks.length) {
+      select.innerHTML = data.decks.map((d) => `<option value="${esc(d)}">${esc(d)}</option>`).join("");
+    }
+    if (current && [...select.options].some((o) => o.value === current)) select.value = current;
+  }
   if (data.board) renderBoard(data.board);
   renderPrompt();
   $("log").innerHTML = data.log.map((l) => `<div class="${l.startsWith("Du:") ? "you" : ""}">${esc(l)}</div>`).join("");
@@ -439,7 +460,9 @@ document.addEventListener("keydown", (e) => {
   if (e.key === "Enter" && $("confirm") && !$("confirm").disabled) $("confirm").click();
 });
 
-$("new").addEventListener("click", () => api("/api/new", { opponent: $("opponent").value }));
+$("new").addEventListener("click", () => api("/api/new", {
+  opponent: $("opponent").value, deck: $("deck").value, botDeck: $("botDeck").value,
+}));
 api("/api/state");
 </script>
 </body>
